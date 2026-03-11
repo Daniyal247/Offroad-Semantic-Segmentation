@@ -1,0 +1,17 @@
+EVALUATION RESULTS
+==================================================
+Mean IoU:          0.2340
+==================================================
+
+Per-Class IoU:
+----------------------------------------
+  Background          : N/A
+  Trees               : 0.1398
+  Lush Bushes         : 0.0001
+  Dry Grass           : 0.2865
+  Dry Bushes          : 0.0000
+  Ground Clutter      : 0.0000
+  Logs                : 0.0000
+  Rocks               : 0.0412
+  Landscape           : 0.5079
+  Sky                 : 0.9043
