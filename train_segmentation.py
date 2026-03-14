@@ -93,11 +93,8 @@ class MaskDataset(Dataset):
         if self.transform:
             image = self.transform(image)
             mask = self.mask_transform(mask) * 255
-            # mask = self.mask_transform(mask)
-
 
         return image, mask
-    
 
 
 # ============================================================================
@@ -390,33 +387,6 @@ def save_history_to_file(history, output_dir):
 
     print(f"Saved evaluation metrics to {filepath}")
 
-# Adding some more helping funtions for the model "Dice Loss Implementation"
-
-class DiceLoss(nn.Module):
-    def __init__(self, num_classes, smooth=1e-6):
-        super().__init__()
-        self.num_classes = num_classes
-        self.smooth = smooth
-
-    def forward(self, logits, targets):
-        """
-        logits: (B, C, H, W)
-        targets: (B, H, W)
-        """
-        probs = F.softmax(logits, dim=1)
-
-        # One-hot encode targets
-        targets_one_hot = F.one_hot(targets, self.num_classes)
-        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()
-
-        dims = (0, 2, 3)
-
-        intersection = torch.sum(probs * targets_one_hot, dims)
-        cardinality = torch.sum(probs + targets_one_hot, dims)
-
-        dice = (2. * intersection + self.smooth) / (cardinality + self.smooth)
-
-        return 1 - dice.mean()
 
 # ============================================================================
 # Main Training Function
@@ -428,15 +398,15 @@ def main():
     print(f"Using device: {device}")
 
     # Hyperparameters
-    batch_size = 16
+    batch_size = 2
     w = int(((960 / 2) // 14) * 14)
     h = int(((540 / 2) // 14) * 14)
     lr = 1e-4
-    n_epochs = 10
+    n_epochs = 40
 
     # Output directory (relative to script location)
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, 'train_stats')
+    output_dir = os.path.join(script_dir, 'train_stats4')
     os.makedirs(output_dir, exist_ok=True)
 
     # Transforms
@@ -450,15 +420,10 @@ def main():
         transforms.Resize((h, w)),
         transforms.ToTensor(),
     ])
-    # mask_transform = transforms.Compose([
-    #     transforms.Resize((h, w), interpolation=Image.NEAREST),
-    #     transforms.PILToTensor(),
-    # ])
-
 
     # Dataset paths (relative to script location)
-    data_dir = os.path.join(script_dir, 'Offroad_Segmentation_Training_Dataset', 'train')
-    val_dir = os.path.join(script_dir, 'Offroad_Segmentation_Training_Dataset', 'val')
+    data_dir = os.path.join(script_dir, '..', 'scripts/Offroad_Segmentation_Training_Dataset', 'train')
+    val_dir = os.path.join(script_dir, '..', 'scripts/Offroad_Segmentation_Training_Dataset', 'val')
 
     # Create datasets
     trainset = MaskDataset(data_dir=data_dir, transform=transform, mask_transform=mask_transform)
@@ -472,7 +437,7 @@ def main():
 
     # Load DINOv2 backbone
     print("Loading DINOv2 backbone...")
-    BACKBONE_SIZE = "base"
+    BACKBONE_SIZE = "small"
     backbone_archs = {
         "small": "vits14",
         "base": "vitb14_reg",
@@ -506,18 +471,8 @@ def main():
     classifier = classifier.to(device)
 
     # Loss and optimizer
-    # loss_fct = torch.nn.CrossEntropyLoss()
-    ce_loss = nn.CrossEntropyLoss()
-    dice_loss = DiceLoss(num_classes=n_classes)
-
-    # optimizer = optim.SGD(classifier.parameters(), lr=lr, momentum=0.9)
-    optimizer = torch.optim.AdamW(
-        list(classifier.parameters()) +
-        list(filter(lambda p: p.requires_grad, backbone_model.parameters())),
-        lr=1e-4,
-        weight_decay=1e-4
-    )
-
+    loss_fct = torch.nn.CrossEntropyLoss()
+    optimizer = optim.SGD(classifier.parameters(), lr=lr, momentum=0.9)
 
     # Training history
     history = {
@@ -546,20 +501,15 @@ def main():
         for imgs, labels in train_pbar:
             imgs, labels = imgs.to(device), labels.to(device)
 
-            # with torch.no_grad():
-            #     output = backbone_model.forward_features(imgs)["x_norm_patchtokens"]
-            output = backbone_model.forward_features(imgs)["x_norm_patchtokens"]
+            with torch.no_grad():
+                output = backbone_model.forward_features(imgs)["x_norm_patchtokens"]
 
             logits = classifier(output.to(device))
             outputs = F.interpolate(logits, size=imgs.shape[2:], mode="bilinear", align_corners=False)
 
             labels = labels.squeeze(dim=1).long()
 
-            # loss = loss_fct(outputs, labels)
-            loss_ce = ce_loss(outputs, labels)
-            loss_dice = dice_loss(outputs, labels)
-            loss = loss_ce + loss_dice
-
+            loss = loss_fct(outputs, labels)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -582,12 +532,7 @@ def main():
                 outputs = F.interpolate(logits, size=imgs.shape[2:], mode="bilinear", align_corners=False)
 
                 labels = labels.squeeze(dim=1).long()
-                # loss = loss_fct(outputs, labels)
-                loss_ce = ce_loss(outputs, labels)
-                loss_dice = dice_loss(outputs, labels)
-                loss = loss_ce + loss_dice
-
-
+                loss = loss_fct(outputs, labels)
                 val_losses.append(loss.item())
                 val_pbar.set_postfix(loss=f"{loss.item():.4f}")
 
